@@ -13,13 +13,9 @@ BOT_TOKEN = os.environ['TG_BOT_TOKEN']
 CHANNEL_ID = int(os.environ['TG_CHANNEL_ID'])
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 NOTIFY_CHAT_ID = int(os.environ['NOTIFY_CHAT_ID'])
-
 SOURCE_CHANNELS_RAW = os.environ.get('SOURCE_CHANNELS', '@crypto_hd,@dimatkachevv')
 SOURCE_CHANNELS = [ch.strip() for ch in SOURCE_CHANNELS_RAW.split(',')]
-
-KEYWORDS_RAW = os.environ.get('KEYWORDS', 'биткоин,BTC,нефть,Сбер,Газпром,инфляция,ставка ЦБ,санкции,США,ЕС,крипта')
-KEYWORDS = [kw.strip() for kw in KEYWORDS_RAW.split(',')]
-
+KEYWORDS_DEFAULT = os.environ.get('KEYWORDS', 'биткоин,BTC,нефть,Сбер,Газпром,инфляция,ставка ЦБ,санкции,США,ЕС,крипта')
 DEDUP_TTL_DAYS = int(os.environ.get('DEDUP_TTL_DAYS', '7'))
 
 openai_client = None
@@ -29,16 +25,36 @@ if OPENAI_API_KEY:
 client = TelegramClient('bot_session', API_ID, API_HASH)
 is_paused = False
 started_at = datetime.utcnow()
+KEYWORDS = []
 
-async def notify(text: str):
+async def notify(text):
     try:
         await client.send_message(NOTIFY_CHAT_ID, text, parse_mode='md')
     except Exception as e:
-        print(f'[!] Ошибка уведомления: {e}')
+        print(f'[!] {e}')
 
 def init_db():
     conn = sqlite3.connect('dedup.db')
     conn.execute('CREATE TABLE IF NOT EXISTS posted (hash TEXT PRIMARY KEY, posted_at TEXT NOT NULL)')
+    conn.execute('CREATE TABLE IF NOT EXISTS keywords (word TEXT PRIMARY KEY)')
+    conn.commit()
+    conn.close()
+
+def load_keywords():
+    conn = sqlite3.connect('dedup.db')
+    rows = conn.execute('SELECT word FROM keywords').fetchall()
+    conn.close()
+    if rows:
+        return [r[0] for r in rows]
+    defaults = [kw.strip() for kw in KEYWORDS_DEFAULT.split(',')]
+    save_keywords(defaults)
+    return defaults
+
+def save_keywords(words):
+    conn = sqlite3.connect('dedup.db')
+    conn.execute('DELETE FROM keywords')
+    for w in words:
+        conn.execute('INSERT OR IGNORE INTO keywords (word) VALUES (?)', (w,))
     conn.commit()
     conn.close()
 
@@ -70,12 +86,14 @@ def get_total_posted():
     conn.close()
     return count
 
-@client.on(events.NewMessage(pattern=r'^/(\w+)'))
+@client.on(events.NewMessage(pattern=r'^/(\w+)(?:\s+(.+))?'))
 async def command_handler(event):
-    global is_paused
+    global is_paused, KEYWORDS
     if event.sender_id != NOTIFY_CHAT_ID:
         return
     cmd = event.pattern_match.group(1).lower()
+    arg = (event.pattern_match.group(2) or '').strip()
+
     if cmd == 'status':
         uptime = datetime.utcnow() - started_at
         hours, remainder = divmod(int(uptime.total_seconds()), 3600)
@@ -88,29 +106,53 @@ async def command_handler(event):
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0).isoformat()
         today = conn.execute('SELECT COUNT(*) FROM posted WHERE posted_at >= ?', (today_start,)).fetchone()[0]
         conn.close()
-        await event.respond(f'📈 *Статистика публикаций*\n\n📅 Сегодня: *{today}*\n📦 Всего за {DEDUP_TTL_DAYS} дней: *{total}*', parse_mode='md')
+        await event.respond(f'📈 *Статистика*\n\n📅 Сегодня: *{today}*\n📦 Всего: *{total}*', parse_mode='md')
     elif cmd == 'pause':
         if is_paused:
-            await event.respond('⏸ Бот уже на паузе. /resume — возобновить')
+            await event.respond('⏸ Уже на паузе. /resume — возобновить')
         else:
             is_paused = True
             await event.respond('⏸ *Бот на паузе.* /resume — возобновить', parse_mode='md')
     elif cmd == 'resume':
         if not is_paused:
-            await event.respond('✅ Бот уже работает.')
+            await event.respond('✅ Уже работает.')
         else:
             is_paused = False
-            await event.respond('✅ *Бот возобновлён!*', parse_mode='md')
+            await event.respond('✅ *Возобновлён!*', parse_mode='md')
     elif cmd == 'keywords':
-        await event.respond(f'🔑 *Ключевые слова:*\n' + '\n'.join(f'• {k}' for k in KEYWORDS), parse_mode='md')
+        kw_list = '\n'.join(f'{i+1}. {k}' for i, k in enumerate(KEYWORDS))
+        await event.respond(f'🔑 *Ключевые слова ({len(KEYWORDS)}):*\n\n{kw_list}\n\nДобавить: `/add_keyword слово`\nУдалить: `/remove_keyword слово`', parse_mode='md')
+    elif cmd == 'add_keyword':
+        if not arg:
+            await event.respond('❌ Укажи слово: `/add_keyword биткоин`', parse_mode='md')
+            return
+        if arg.lower() in [k.lower() for k in KEYWORDS]:
+            await event.respond(f'⚠️ Слово `{arg}` уже есть.', parse_mode='md')
+            return
+        KEYWORDS.append(arg)
+        save_keywords(KEYWORDS)
+        await event.respond(f'✅ `{arg}` добавлено! Всего слов: {len(KEYWORDS)}', parse_mode='md')
+    elif cmd == 'remove_keyword':
+        if not arg:
+            await event.respond('❌ Укажи слово: `/remove_keyword биткоин`', parse_mode='md')
+            return
+        match = next((k for k in KEYWORDS if k.lower() == arg.lower()), None)
+        if not match:
+            await event.respond(f'⚠️ Слово `{arg}` не найдено.', parse_mode='md')
+            return
+        if len(KEYWORDS) <= 1:
+            await event.respond('❌ Нельзя удалить последнее слово.')
+            return
+        KEYWORDS.remove(match)
+        save_keywords(KEYWORDS)
+        await event.respond(f'🗑 `{match}` удалено. Осталось: {len(KEYWORDS)}', parse_mode='md')
     elif cmd == 'help':
-        await event.respond('🤖 *Команды:*\n\n/status — состояние\n/stats — статистика\n/pause — пауза\n/resume — возобновить\n/keywords — ключевые слова\n/help — справка', parse_mode='md')
+        await event.respond('🤖 *Команды:*\n\n/status — состояние\n/stats — статистика\n/pause — пауза\n/resume — возобновить\n/keywords — список слов\n/add\\_keyword слово — добавить\n/remove\\_keyword слово — удалить\n/help — справка', parse_mode='md')
     else:
-        await event.respond('❓ Неизвестная команда. /help')
+        await event.respond('❓ /help — список команд')
 
 @client.on(events.NewMessage(chats=SOURCE_CHANNELS))
 async def handler(event):
-    global is_paused
     if is_paused:
         return
     msg = event.message
@@ -120,7 +162,7 @@ async def handler(event):
         if word.lower() in msg.text.lower():
             if is_duplicate(msg.text):
                 return
-            print(f'[+] Новость: {msg.text[:60]}')
+            print(f'[+] {msg.text[:60]}')
             try:
                 new_text = msg.text
                 if openai_client:
@@ -166,11 +208,13 @@ async def start_web():
     print(f'[*] Веб-сервер на порту {port}')
 
 async def main():
+    global KEYWORDS
     init_db()
+    KEYWORDS = load_keywords()
     await start_web()
     await client.start(bot_token=BOT_TOKEN)
     print('[✓] Бот запущен!')
-    await notify(f'🤖 *Бот запущен*\n📡 Слежу за: {", ".join(SOURCE_CHANNELS)}\n🔑 Ключевых слов: {len(KEYWORDS)}\n\nНапиши /help для списка команд')
+    await notify(f'🤖 *Бот запущен*\n📡 {", ".join(SOURCE_CHANNELS)}\n🔑 Слов: {len(KEYWORDS)}\n\n/help — список команд')
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
