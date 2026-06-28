@@ -278,12 +278,38 @@ async def command_handler(event):
             parse_mode='md'
         )
 
+    elif cmd == 'test':
+        await event.respond('🔍 Проверяю каналы, подожди...')
+        found_any = False
+        for ch in SOURCE_CHANNELS:
+            try:
+                messages = await client.get_messages(ch, limit=3)
+                if not messages:
+                    await event.respond(f'📡 `{ch}` — нет сообщений', parse_mode='md')
+                    continue
+                found_any = True
+                lines = [f'📡 *{ch}* — последние сообщения:\n']
+                for i, m in enumerate(messages, 1):
+                    if m.text:
+                        preview = m.text[:120].replace('`', "'")
+                        matched = [w for w in KEYWORDS if w.lower() in m.text.lower()]
+                        kw_str = f' 🔑 `{", ".join(matched)}`' if matched else ''
+                        lines.append(f'*{i}.* `{preview}...`{kw_str}')
+                    else:
+                        lines.append(f'*{i}.* _(медиа без текста)_')
+                await event.respond('\n'.join(lines), parse_mode='md')
+            except Exception as e:
+                await event.respond(f'❌ Не могу прочитать `{ch}`: `{e}`', parse_mode='md')
+        if not found_any:
+            await event.respond('⚠️ Ни один канал не вернул сообщений.')
+
     elif cmd == 'help':
         await event.respond(
             '🤖 *Команды управления ботом:*\n\n'
             '📊 *Мониторинг*\n'
             '/status — состояние и аптайм\n'
-            '/stats — статистика публикаций\n\n'
+            '/stats — статистика публикаций\n'
+            '/test — проверить каналы-источники\n\n'
             '⏯ *Управление*\n'
             '/pause — поставить на паузу\n'
             '/resume — возобновить работу\n\n'
