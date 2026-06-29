@@ -28,6 +28,7 @@ if OPENAI_API_KEY:
     openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
 client = TelegramClient('bot_session', API_ID, API_HASH)
+client.parse_mode = 'md'
 is_paused = False
 started_at = datetime.utcnow()
 KEYWORDS = []
@@ -227,23 +228,24 @@ async def command_handler(event):
     cmd = event.pattern_match.group(1).lower()
     arg = (event.pattern_match.group(2) or '').strip()
 
+    SEP = '〰〰〰〰〰〰〰〰〰〰'
+
     # ── /status ──────────────────────────────────────────────
     if cmd == 'status':
         uptime = datetime.utcnow() - started_at
         hours, rem = divmod(int(uptime.total_seconds()), 3600)
         minutes = rem // 60
-        state = '⏸  На паузе' if is_paused else '🟢  Работает'
-        ai_state = '🟢  Включён' if openai_client else '🔴  Выключен'
+        state = '⏸ На паузе' if is_paused else '🟢 Работает'
+        ai = '🟢 Включён' if openai_client else '🔴 Выключен'
         await event.respond(
-            f'📊 *Статус бота*\n'
-            f'━━━━━━━━━━━━━━━━━━\n'
-            f'Состояние      {state}\n'
-            f'⏱ Аптайм       {hours}ч {minutes}мин\n'
-            f'📡 Каналов      {len(SOURCE_CHANNELS)}\n'
-            f'🔑 Слов         {len(KEYWORDS)}\n'
-            f'🤖 ИИ           {ai_state}\n'
-            f'━━━━━━━━━━━━━━━━━━',
-            parse_mode='md'
+            f'**📊 Статус бота**\n'
+            f'{SEP}\n'
+            f'🔘 Режим: {state}\n'
+            f'⏱ Аптайм: **{hours}ч {minutes}мин**\n'
+            f'📡 Слежу за каналами: **{len(SOURCE_CHANNELS)}**\n'
+            f'🔑 Ключевых слов: **{len(KEYWORDS)}**\n'
+            f'🤖 ИИ-переработка: {ai}\n'
+            f'{SEP}'
         )
 
     # ── /stats ────────────────────────────────────────────────
@@ -260,238 +262,235 @@ async def command_handler(event):
         ).fetchone()[0]
         conn.close()
         await event.respond(
-            f'📈 *Статистика публикаций*\n'
-            f'━━━━━━━━━━━━━━━━━━\n'
-            f'📅 Сегодня       *{today}* новостей\n'
-            f'📆 За 7 дней     *{week}* новостей\n'
-            f'📦 Всего в базе  *{total}* записей\n'
-            f'━━━━━━━━━━━━━━━━━━',
-            parse_mode='md'
+            f'**📈 Статистика публикаций**\n'
+            f'{SEP}\n'
+            f'📅 Сегодня — **{today}** новостей\n'
+            f'📆 За 7 дней — **{week}** новостей\n'
+            f'📦 Всего в базе — **{total}** записей\n'
+            f'{SEP}'
         )
 
     # ── /pause / /resume ──────────────────────────────────────
     elif cmd == 'pause':
         if is_paused:
             await event.respond(
-                '⏸ *Бот уже на паузе*\n\nЧтобы возобновить — /resume',
-                parse_mode='md'
+                '⏸ **Бот уже на паузе**\n\n'
+                'Чтобы возобновить работу — нажми /resume'
             )
         else:
             is_paused = True
             await event.respond(
-                '⏸ *Бот поставлен на паузу*\n\n'
+                '⏸ **Бот поставлен на паузу**\n\n'
                 'Новые посты публиковаться не будут.\n'
-                'Возобновить: /resume',
-                parse_mode='md'
+                'Возобновить: /resume'
             )
 
     elif cmd == 'resume':
         if not is_paused:
             await event.respond(
-                '🟢 *Бот уже работает*\n\nВсё в порядке, слежу за новостями.',
-                parse_mode='md'
+                '🟢 **Бот уже работает**\n\n'
+                'Всё в порядке — слежу за каналами.'
             )
         else:
             is_paused = False
             await event.respond(
-                '▶️ *Бот возобновлён!*\n\nСнова слежу за каналами и публикую новости.',
-                parse_mode='md'
+                '▶️ **Бот возобновлён!**\n\n'
+                'Снова слежу за каналами и публикую новости.'
             )
 
     # ── /keywords ─────────────────────────────────────────────
     elif cmd == 'keywords':
-        kw_list = '\n'.join(f'  {i+1:>2}. {k}' for i, k in enumerate(KEYWORDS))
+        kw_list = '\n'.join(f'  {i+1}. {k}' for i, k in enumerate(KEYWORDS))
         await event.respond(
-            f'🔑 *Ключевые слова*  _{len(KEYWORDS)} шт._\n'
-            f'━━━━━━━━━━━━━━━━━━\n'
+            f'**🔑 Ключевые слова** — {len(KEYWORDS)} шт.\n'
+            f'{SEP}\n'
             f'{kw_list}\n'
-            f'━━━━━━━━━━━━━━━━━━\n'
-            f'➕ `/add_keyword слово`\n'
-            f'➖ `/remove_keyword слово`',
-            parse_mode='md'
+            f'{SEP}\n'
+            f'➕ Добавить: /add\_keyword слово\n'
+            f'➖ Удалить: /remove\_keyword слово'
         )
 
     elif cmd == 'add_keyword':
         if not arg:
             await event.respond(
-                '❌ *Не указано слово*\n\nПример: `/add_keyword золото`',
-                parse_mode='md'
+                '❌ **Не указано слово**\n\n'
+                'Пример использования:\n'
+                '/add\_keyword золото'
             )
             return
         if arg.lower() in [k.lower() for k in KEYWORDS]:
             await event.respond(
-                f'⚠️ *Слово уже есть в списке*\n\n`{arg}` — уже отслеживается.',
-                parse_mode='md'
+                f'⚠️ **Слово уже отслеживается**\n\n'
+                f'`{arg}` есть в списке.\n'
+                f'Посмотреть все слова: /keywords'
             )
             return
         KEYWORDS.append(arg)
         save_keywords(KEYWORDS)
         await event.respond(
-            f'✅ *Слово добавлено*\n\n`{arg}` — теперь отслеживается.\n🔑 Всего слов: *{len(KEYWORDS)}*',
-            parse_mode='md'
+            f'✅ **Слово добавлено!**\n\n'
+            f'Теперь отслеживаю: `{arg}`\n'
+            f'Всего слов в списке: **{len(KEYWORDS)}**'
         )
         print(f'[+] Ключевое слово: {arg}')
 
     elif cmd == 'remove_keyword':
         if not arg:
             await event.respond(
-                '❌ *Не указано слово*\n\nПример: `/remove_keyword золото`',
-                parse_mode='md'
+                '❌ **Не указано слово**\n\n'
+                'Пример использования:\n'
+                '/remove\_keyword золото'
             )
             return
         match = next((k for k in KEYWORDS if k.lower() == arg.lower()), None)
         if not match:
             await event.respond(
-                f'⚠️ *Слово не найдено*\n\n`{arg}` — нет в списке.\nПосмотреть список: /keywords',
-                parse_mode='md'
+                f'⚠️ **Слово не найдено**\n\n'
+                f'`{arg}` нет в списке.\n'
+                f'Посмотреть список: /keywords'
             )
             return
         if len(KEYWORDS) <= 1:
             await event.respond(
-                '❌ *Нельзя удалить*\n\nДолжно остаться хотя бы одно слово.',
-                parse_mode='md'
+                '❌ **Нельзя удалить последнее слово**\n\n'
+                'В списке должно быть хотя бы одно слово.'
             )
             return
         KEYWORDS.remove(match)
         save_keywords(KEYWORDS)
         await event.respond(
-            f'🗑 *Слово удалено*\n\n`{match}` — убрано из списка.\n🔑 Осталось слов: *{len(KEYWORDS)}*',
-            parse_mode='md'
+            f'🗑 **Слово удалено**\n\n'
+            f'`{match}` убрано из отслеживания.\n'
+            f'Осталось слов: **{len(KEYWORDS)}**'
         )
         print(f'[-] Ключевое слово удалено: {match}')
 
     # ── /sources ──────────────────────────────────────────────
     elif cmd == 'sources':
-        src_list = '\n'.join(f'  {i+1:>2}. {s}' for i, s in enumerate(SOURCE_CHANNELS))
+        src_list = '\n'.join(f'  {i+1}. {s}' for i, s in enumerate(SOURCE_CHANNELS))
         await event.respond(
-            f'📡 *Каналы-источники*  _{len(SOURCE_CHANNELS)} шт._\n'
-            f'━━━━━━━━━━━━━━━━━━\n'
+            f'**📡 Каналы-источники** — {len(SOURCE_CHANNELS)} шт.\n'
+            f'{SEP}\n'
             f'{src_list}\n'
-            f'━━━━━━━━━━━━━━━━━━\n'
-            f'➕ `/add_source @channel`\n'
-            f'➖ `/remove_source @channel`\n'
-            f'🔄 `/restart_sources` — применить изменения',
-            parse_mode='md'
+            f'{SEP}\n'
+            f'➕ Добавить: /add\_source @channel\n'
+            f'➖ Удалить: /remove\_source @channel\n'
+            f'🔄 Применить изменения: /restart\_sources'
         )
 
     elif cmd == 'add_source':
         if not arg:
             await event.respond(
-                '❌ *Не указан канал*\n\nПример: `/add_source @rbc_news`',
-                parse_mode='md'
+                '❌ **Не указан канал**\n\n'
+                'Пример использования:\n'
+                '/add\_source @rbc\_news'
             )
             return
         ch = arg if arg.startswith('@') else f'@{arg}'
         if ch.lower() in [s.lower() for s in SOURCE_CHANNELS]:
             await event.respond(
-                f'⚠️ *Канал уже добавлен*\n\n`{ch}` — уже в списке источников.',
-                parse_mode='md'
+                f'⚠️ **Канал уже добавлен**\n\n'
+                f'`{ch}` уже есть в списке источников.'
             )
             return
         SOURCE_CHANNELS.append(ch)
         save_sources(SOURCE_CHANNELS)
         await event.respond(
-            f'✅ *Канал добавлен*\n\n`{ch}` — добавлен в источники.\n'
-            f'📡 Всего каналов: *{len(SOURCE_CHANNELS)}*\n\n'
-            f'Запусти /restart\\_sources чтобы бот начал его читать.',
-            parse_mode='md'
+            f'✅ **Канал добавлен!**\n\n'
+            f'`{ch}` добавлен в источники.\n'
+            f'Всего каналов: **{len(SOURCE_CHANNELS)}**\n\n'
+            f'Чтобы бот начал его читать — /restart\_sources'
         )
 
     elif cmd == 'remove_source':
         if not arg:
             await event.respond(
-                '❌ *Не указан канал*\n\nПример: `/remove_source @rbc_news`',
-                parse_mode='md'
+                '❌ **Не указан канал**\n\n'
+                'Пример использования:\n'
+                '/remove\_source @rbc\_news'
             )
             return
         ch = arg if arg.startswith('@') else f'@{arg}'
         match = next((s for s in SOURCE_CHANNELS if s.lower() == ch.lower()), None)
         if not match:
             await event.respond(
-                f'⚠️ *Канал не найден*\n\n`{ch}` — нет в списке.\nПосмотреть: /sources',
-                parse_mode='md'
+                f'⚠️ **Канал не найден**\n\n'
+                f'`{ch}` нет в списке.\n'
+                f'Посмотреть список: /sources'
             )
             return
         if len(SOURCE_CHANNELS) <= 1:
             await event.respond(
-                '❌ *Нельзя удалить*\n\nДолжен остаться хотя бы один канал.',
-                parse_mode='md'
+                '❌ **Нельзя удалить последний канал**\n\n'
+                'Должен остаться хотя бы один источник.'
             )
             return
         SOURCE_CHANNELS.remove(match)
         save_sources(SOURCE_CHANNELS)
         await event.respond(
-            f'🗑 *Канал удалён*\n\n`{match}` — убран из источников.\n'
-            f'📡 Осталось каналов: *{len(SOURCE_CHANNELS)}*\n\n'
-            f'Запусти /restart\\_sources чтобы изменения вступили в силу.',
-            parse_mode='md'
+            f'🗑 **Канал удалён**\n\n'
+            f'`{match}` убран из источников.\n'
+            f'Осталось каналов: **{len(SOURCE_CHANNELS)}**\n\n'
+            f'Чтобы изменения вступили в силу — /restart\_sources'
         )
 
     elif cmd == 'restart_sources':
         client.remove_event_handler(news_handler)
         client.add_event_handler(news_handler, events.NewMessage(chats=SOURCE_CHANNELS))
-        src_list = '\n'.join(f'  ▸ {s}' for s in SOURCE_CHANNELS)
+        src_list = '\n'.join(f'  ✔ {s}' for s in SOURCE_CHANNELS)
         await event.respond(
-            f'🔄 *Подписки обновлены*\n'
-            f'━━━━━━━━━━━━━━━━━━\n'
+            f'🔄 **Подписки обновлены!**\n'
+            f'{SEP}\n'
             f'{src_list}\n'
-            f'━━━━━━━━━━━━━━━━━━\n'
-            f'Слежу за {len(SOURCE_CHANNELS)} каналами.',
-            parse_mode='md'
+            f'{SEP}\n'
+            f'Слежу за **{len(SOURCE_CHANNELS)}** каналами.'
         )
         print(f'[~] Перезапущены источники: {SOURCE_CHANNELS}')
 
     # ── /test ─────────────────────────────────────────────────
     elif cmd == 'test':
-        lines = [
-            f'🔍 *Проверка подключения*\n'
-            f'━━━━━━━━━━━━━━━━━━'
-        ]
+        lines = [f'**🔍 Проверка каналов**\n{SEP}']
         for ch in SOURCE_CHANNELS:
             try:
                 entity = await client.get_entity(ch)
                 title = getattr(entity, 'title', ch)
                 members = getattr(entity, 'participants_count', None)
-                members_str = f'  _{members:,} подп._' if members else ''
-                lines.append(f'✅ *{title}*\n    `{ch}`{members_str}')
+                sub = f' · {members:,} подписчиков' if members else ''
+                lines.append(f'✅ **{title}**\n    `{ch}`{sub}')
             except Exception as e:
-                lines.append(f'❌ `{ch}`\n    _{e}_')
-        lines.append(
-            f'━━━━━━━━━━━━━━━━━━\n'
-            f'🔑 Слов: *{len(KEYWORDS)}*   '
-            f'⏯ {"⏸ Пауза" if is_paused else "🟢 Работает"}'
-        )
-        await event.respond('\n\n'.join(lines), parse_mode='md')
+                lines.append(f'❌ `{ch}` — недоступен')
+        state_str = '⏸ На паузе' if is_paused else '🟢 Работает'
+        lines.append(f'{SEP}\n🔑 Слов: **{len(KEYWORDS)}** · Режим: {state_str}')
+        await event.respond('\n\n'.join(lines))
 
     # ── /help ─────────────────────────────────────────────────
     elif cmd == 'help':
         await event.respond(
-            '🤖 *Управление ботом*\n'
-            '━━━━━━━━━━━━━━━━━━\n\n'
-            '📊 *Мониторинг*\n'
-            '  /status — состояние и аптайм\n'
-            '  /stats — статистика публикаций\n'
-            '  /test — проверить каналы\n\n'
-            '⏯ *Управление*\n'
-            '  /pause — пауза\n'
-            '  /resume — возобновить\n\n'
-            '🔑 *Ключевые слова*\n'
-            '  /keywords — список\n'
-            '  /add\\_keyword _слово_\n'
-            '  /remove\\_keyword _слово_\n\n'
-            '📡 *Каналы-источники*\n'
-            '  /sources — список\n'
-            '  /add\\_source _@channel_\n'
-            '  /remove\\_source _@channel_\n'
-            '  /restart\\_sources — применить\n'
-            '━━━━━━━━━━━━━━━━━━',
-            parse_mode='md'
+            f'**🤖 Команды бота**\n'
+            f'{SEP}\n\n'
+            f'**📊 Мониторинг**\n'
+            f'/status — состояние и аптайм\n'
+            f'/stats — статистика публикаций\n'
+            f'/test — проверить каналы\n\n'
+            f'**⏯ Управление**\n'
+            f'/pause — поставить на паузу\n'
+            f'/resume — возобновить работу\n\n'
+            f'**🔑 Ключевые слова**\n'
+            f'/keywords — показать список\n'
+            f'/add\_keyword слово — добавить\n'
+            f'/remove\_keyword слово — удалить\n\n'
+            f'**📡 Каналы-источники**\n'
+            f'/sources — показать список\n'
+            f'/add\_source @channel — добавить\n'
+            f'/remove\_source @channel — удалить\n'
+            f'/restart\_sources — применить изменения\n'
+            f'{SEP}'
         )
 
     else:
         await event.respond(
-            '❓ *Неизвестная команда*\n\nНапиши /help — покажу всё что умею.',
-            parse_mode='md'
+            '❓ **Неизвестная команда**\n\n'
+            'Напиши /help — покажу всё что умею.'
         )
 
 
